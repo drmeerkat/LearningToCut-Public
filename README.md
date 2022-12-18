@@ -18,6 +18,19 @@ Train the agent with wandb logging turned on and easy config:
 ```
 $ python main.py --config easy --track true --wandb-project-name finalproject --wandb-entity orcs4529
 ```
+If you plan to use wandb, remember to provide your **login key** at `main.py:line 95`,
+```
+wandb.login(key="your key here")
+```
+
+To evaluate multiple trained agents together with easy config:
+```
+$ python main.py --config easy --eva-only --load-dir /the_dir_to_all_weights_you_want_to_test
+```
+
+If there is only one saved weights file in the given directory, that single agent will be evaluated.
+
+Feel free to explore `main.py` and tune any other parameters you want!
 
 ## State-Action Description
 

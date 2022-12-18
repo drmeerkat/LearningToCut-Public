@@ -1,4 +1,5 @@
 import gym
+import os
 import torch
 import argparse
 import numpy as np
@@ -36,6 +37,10 @@ def parse_args():
         help="the entity (team) of wandb's project")
     parser.add_argument("--config", type=str, choices=['easy', 'hard', 'custom'], default='easy',
         help="the type of environment being used for training and testing")
+    parser.add_argument("--eva-only", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+        help="if toggled, will only evaluate the agent given weights loading dirs ")
+    parser.add_argument("--load-dir", type=str, default='./saved_weights',
+        help="Use with eva-only toggled. This is the directory where all the weights to be evaluated are stored")
 
     # Algorithm specific arguments
     parser.add_argument("--num-envs", type=int, default=8,
@@ -135,27 +140,59 @@ if __name__ == "__main__":
     agent.train()
     agent.to(device)
 
-    # Training
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
-    print(f'Start to train on task setting: {args.config}.')
+    if not args.eva_only:
+        # Training
+        optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+        print(f'Start to train on task setting: {args.config}.')
+        train(
+            envs=train_envs,
+            evaluate_env=eva_env,
+            agent=agent,
+            args=args,
+            device=device,
+            timestamp=timestamp,
+            optimizer=optimizer,
+        )
 
-    train(
-        envs=train_envs,
-        evaluate_env=eva_env,
-        agent=agent,
-        args=args,
-        device=device,
-        timestamp=timestamp,
-        optimizer=optimizer,
-    )
+        print(f'Start to evaluate on task setting: {args.config}.')
+        agent.evaluate()
+        eva_return = evaluate(
+            env=eva_env,
+            agent=agent,
+            args=args,
+            device=device,
+            ep=100
+        )
 
-    print(f'Start to evaluate on task setting: {args.config}.')
-    eva_return = evaluate(
-        env=eva_env,
-        agent=agent,
-        args=args,
-        device=device,
-        ep=100
-    )
+        print(f"Evaluation performance under {args.config} config: {eva_return:.3f}")
 
-    print(f"Evaluation performance under {args.config} config: {eva_return:.3f}")
+    else:
+        print(f'Start to evaluate on task setting: {args.config}.')
+        # easy: scratch/explogs/LearningToCut/checkpoints/20221212_2335_learn2cutAgent_easy/
+        # hard: scratch/explogs/LearningToCut/checkpoints/20221213_1353_learn2cutAgent_hard
+        wt_dirs = sorted(os.listdir(args.load_dir), key=lambda x:int(x.split('.')[0]))
+        if args.track:
+            from collections import deque
+            eva_returns = deque(maxlen=100)
+        for wt in wt_dirs:
+            agent.load_state_dict(torch.load(os.path.join(args.load_dir, wt)))
+            agent.eval()
+            agent.to(device)
+            print(f'Start to evaluate weight {wt}.')
+            # run 10 episodes for each weight
+            for ep in range(10):
+                eva_return = evaluate(
+                    env=eva_env,
+                    agent=agent,
+                    args=args,
+                    device=device,
+                    ep=1
+                )
+
+                print(f"Evaluation performance for wt {wt} in ep {ep}: {eva_return:.3f}")
+                if args.track:
+                    eva_returns.append(eva_return)
+                    wandb.log({f"Evaluation Reward ({args.config})": eva_return})
+                    if len(eva_returns) == eva_returns.maxlen:
+                        wandb.log({f"Evaluation Reward Moving Avg ({args.config})": sum(eva_returns)/eva_returns.maxlen})
+                # break
